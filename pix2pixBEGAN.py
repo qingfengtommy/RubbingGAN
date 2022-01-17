@@ -1,303 +1,210 @@
-from __future__ import print_function
-import argparse
-import os
-import sys
-import random
 import torch
-import torch.nn as nn
-import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-cudnn.benchmark = True
-cudnn.fastest = True
-import torch.optim as optim
-import torchvision.utils as vutils
-from torch.autograd import Variable
+import torch.nn as nn
 
-import models.UNet1 as net
-from misc import *
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', required=False,
-  default='pix2pix',  help='')
-parser.add_argument('--dataroot', required=False,
-  default='/home1/sgb/pixChi/data/to/train/', help='path to trn dataset')
-parser.add_argument('--valDataroot', required=False,
-  default='/home1/sgb/pixChi/data/to/val/', help='path to val dataset')
-parser.add_argument('--mode', type=str, default='A2B', help='B2A: facade, A2B: edges2shoes')
-parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
-parser.add_argument('--valBatchSize', type=int, default=64, help='input batch size')
-parser.add_argument('--originalSize', type=int,
-  default=256, help='the height / width of the original input image')
-parser.add_argument('--imageSize', type=int,
-  default=256, help='the height / width of the cropped input image to network')
-parser.add_argument('--inputChannelSize', type=int,
-  default=3, help='size of the input channels')
-parser.add_argument('--outputChannelSize', type=int,
-  default=3, help='size of the output channels')
-parser.add_argument('--ngf', type=int, default=64)
-parser.add_argument('--ndf', type=int, default=64)
-parser.add_argument('--niter', type=int, default=400, help='number of epochs to train for')
-parser.add_argument('--lrD', type=float, default=0.0002, help='learning rate, default=0.0002')
-parser.add_argument('--lrG', type=float, default=0.0002, help='learning rate, default=0.0002')
-parser.add_argument('--annealStart', type=int, default=0, help='annealing learning rate start to')
-parser.add_argument('--annealEvery', type=int, default=400, help='epoch to reaching at learning rate of 0')
-parser.add_argument('--lambdaGAN', type=float, default=1, help='lambdaGAN')
-parser.add_argument('--lambdaIMG', type=float, default=0.1, help='lambdaIMG')
-parser.add_argument('--poolSize', type=int, default=50, help='Buffer size for storing previously generated samples from G')
-parser.add_argument('--lambda_k', type=float, default=0.001, help='learning rate of k')
-parser.add_argument('--gamma', type=float, default=0.7, help='balance bewteen D and G')
-parser.add_argument('--wd', type=float, default=0.0000, help='weight decay in D')
-parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam')
-parser.add_argument('--netG', default='', help="path to netG (to continue training)")
-parser.add_argument('--netD', default='', help="path to netD (to continue training)")
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
-parser.add_argument('--exp', default='test_checkpoint', help='folder to output images and model checkpoints')
-parser.add_argument('--display', type=int, default=100, help='interval for displaying train-logs')
-parser.add_argument('--evalIter', type=int, default=50, help='interval for evauating(generating) images from valDataroot')
-parser.add_argument('--hidden_size', type=int, default=64, help='bottleneck dimension of Discriminator')
-opt = parser.parse_args()
-print(opt)
-
-create_exp_dir(opt.exp)
-#opt.manualSeed = random.randint(1, 10000)
-opt.manualSeed = 101
-random.seed(opt.manualSeed)
-torch.manual_seed(opt.manualSeed)
-torch.cuda.manual_seed_all(opt.manualSeed)
-print("Random Seed: ", opt.manualSeed)
-
-# get dataloader
-dataloader = getLoader(opt.dataset,
-                       opt.dataroot,
-                       opt.originalSize,
-                       opt.imageSize,
-                       opt.batchSize,
-                       opt.workers,
-                       mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
-                       split='train',
-                       shuffle=True,
-                       seed=opt.manualSeed)
-valDataloader = getLoader(opt.dataset,
-                          opt.valDataroot,
-                          opt.imageSize, #opt.originalSize,
-                          opt.imageSize,
-                          opt.valBatchSize,
-                          opt.workers,
-                          mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
-                          split='val',
-                          shuffle=False,
-                          seed=opt.manualSeed)
-
-# get logger
-trainLogger = open('%s/train.log' % opt.exp, 'w')
-
-ngf = opt.ngf
-ndf = opt.ndf
-inputChannelSize = opt.inputChannelSize
-outputChannelSize= opt.outputChannelSize
-
-# get models
-netG = net.G(inputChannelSize, outputChannelSize, ngf)
-netG.apply(weights_init)
-if opt.netG != '':
-  netG.load_state_dict(torch.load(opt.netG))
-print(netG)
-netD = net.D(inputChannelSize + outputChannelSize, ndf)
-netD.apply(weights_init)
-if opt.netD != '':
-  netD.load_state_dict(torch.load(opt.netD))
-print(netD)
-
-netD1 = net.D1(inputChannelSize, ndf, opt.hidden_size)
-netD1.apply(weights_init)
-
-netG.train()
-netD.train()
-netD1.train()
-criterionBCE = nn.BCELoss()
-criterionCAE = nn.L1Loss()
-
-target= torch.FloatTensor(opt.batchSize, outputChannelSize, opt.imageSize, opt.imageSize)
-input = torch.FloatTensor(opt.batchSize, inputChannelSize, opt.imageSize, opt.imageSize)
-val_target= torch.FloatTensor(opt.valBatchSize, outputChannelSize, opt.imageSize, opt.imageSize)
-val_input = torch.FloatTensor(opt.valBatchSize, inputChannelSize, opt.imageSize, opt.imageSize)
-label_d = torch.FloatTensor(opt.batchSize)
-# NOTE: size of 2D output maps in the discriminator
-sizePatchGAN = 30
-real_label = 1
-fake_label = 0
-
-# image pool storing previously generated samples from G
-imagePool = ImagePool(opt.poolSize)
-
-# NOTE weight for L_cGAN and L_L1 (i.e. Eq.(4) in the paper)
-lambdaGAN = opt.lambdaGAN
-lambdaIMG = opt.lambdaIMG
-
-netD.cuda()
-netG.cuda()
-netD1.cuda()
-criterionBCE.cuda()
-criterionCAE.cuda()
-target, input, label_d = target.cuda(), input.cuda(), label_d.cuda()
-val_target, val_input = val_target.cuda(), val_input.cuda()
-
-target = Variable(target)
-input = Variable(input)
-label_d = Variable(label_d)
-
-# get randomly sampled validation images and save it
-val_iter = iter(valDataloader)
-data_val = val_iter.next()
-if opt.mode == 'B2A':
-  val_target_cpu, val_input_cpu = data_val
-elif opt.mode == 'A2B':
-  val_input_cpu, val_target_cpu = data_val
-val_target_cpu, val_input_cpu = val_target_cpu.cuda(), val_input_cpu.cuda()
-val_target.resize_as_(val_target_cpu).copy_(val_target_cpu)
-val_input.resize_as_(val_input_cpu).copy_(val_input_cpu)
-vutils.save_image(val_target, '%s/real_target.png' % opt.exp, normalize=True)
-vutils.save_image(val_input, '%s/real_input.png' % opt.exp, normalize=True)
-
-# get optimizer
-optimizerD = optim.Adam(netD.parameters(), lr = opt.lrD, betas = (opt.beta1, 0.999), weight_decay=opt.wd)
-optimizerG = optim.Adam(netG.parameters(), lr = opt.lrG, betas = (opt.beta1, 0.999), weight_decay=0.0)
-optimizerD1 = optim.Adam(netD1.parameters(), lr = opt.lrD, betas = (opt.beta1, 0.999), weight_decay=opt.wd)
-# NOTE training loop
-ganIterations = 0
-k = 0 # control how much emphasis is put on L(G(z_D)) during gradient descent.
-M_global = AverageMeter() #
-for epoch in range(opt.niter):
-  if epoch > opt.annealStart:
-    adjust_learning_rate(optimizerD, opt.lrD, epoch, None, opt.annealEvery)
-    adjust_learning_rate(optimizerG, opt.lrG, epoch, None, opt.annealEvery)
-    adjust_learning_rate(optimizerD1, opt.lrD, epoch, None, opt.annealEvery)
-  for i, data in enumerate(dataloader, 0):
-    if opt.mode == 'B2A':
-      target_cpu, input_cpu = data
-    elif opt.mode == 'A2B' :
-      input_cpu, target_cpu = data
-    batch_size = target_cpu.size(0)
-
-    target_cpu, input_cpu = target_cpu.cuda(), input_cpu.cuda()
-    # NOTE paired samples
-    target.resize_as_(target_cpu).copy_(target_cpu)
-    input.resize_as_(input_cpu).copy_(input_cpu)
-
-    # max_D first
-    for p in netD.parameters():
-      p.requires_grad = True
-    netD.zero_grad()
-
-    # NOTE: compute L_cGAN in eq.(2)
-    label_d.resize_((batch_size, 1, sizePatchGAN, sizePatchGAN)).fill_(real_label)
-    #print(label_d.shape)
-    output = netD(torch.cat([target, input], 1)) # conditional
-    errD_real = criterionBCE(output, label_d)
-    errD_real.backward()
-    D_x = output.data.mean()
-    x_hat = netG(input)
-    fake = x_hat.detach()
-    fake = Variable(imagePool.query(fake.data))
-    label_d.data.fill_(fake_label)
-    output = netD(torch.cat([fake, input], 1)) # conditional
-    errD_fake = criterionBCE(output, label_d)
-    errD_fake.backward()
-    D_G_z1 = output.data.mean()
-    errD = errD_real + errD_fake
-    optimizerD.step() # update parameters
-
-    # prevent computing gradients of weights in Discriminator
-    for p in netD.parameters():
-      p.requires_grad = False
-    netG.zero_grad() # start to update G
-
-    # compute L_L1 (eq.(4) in the paper
-    L_img_ = criterionCAE(x_hat, target)
-    L_img = lambdaIMG * L_img_
-    if lambdaIMG != 0:
-      L_img.backward(retain_graph=True) # in case of current version of pytorch
-     #L_img.backward(retain_variables=True)
-
-    # compute L_cGAN (eq.(2) in the paper
-    label_d.data.fill_(real_label)
-    output = netD(torch.cat([x_hat, input], 1))
-    errG_ = criterionBCE(output, label_d)
-    errG = lambdaGAN * errG_
-    if lambdaGAN != 0:
-      errG.backward()
-    D_G_z2 = output.data.mean()
-
-    optimizerG.step()
-    ganIterations += 1
+def conv_block(in_dim,out_dim):
+  return nn.Sequential(nn.Conv2d(in_dim,in_dim,kernel_size=3,stride=1,padding=1),
+                       nn.ELU(True),
+                       nn.Conv2d(in_dim,in_dim,kernel_size=3,stride=1,padding=1),
+                       nn.ELU(True),
+                       nn.Conv2d(in_dim,out_dim,kernel_size=1,stride=1,padding=0),
+                       nn.AvgPool2d(kernel_size=2,stride=2))
+def deconv_block(in_dim,out_dim):
+  return nn.Sequential(nn.Conv2d(in_dim,out_dim,kernel_size=3,stride=1,padding=1),
+                       nn.ELU(True),
+                       nn.Conv2d(out_dim,out_dim,kernel_size=3,stride=1,padding=1),
+                       nn.ELU(True),
+                       nn.UpsamplingNearest2d(scale_factor=2))
 
 
-    ####
-    # max_D first
-    for p in netD1.parameters():
-      p.requires_grad = True
-    netD1.zero_grad()
-    # NOTE: compute L_D
-    recon_real1 = netD1(target)
-    #vutils.save_image(recon_real,'/home1/sgb/began/recon_real/'+str(i)+'.png',normalize = True)
-    x_hat1 = netG(input)
-    #vutils.save_image(x_hat,'/home1/sgb/began/x_hat/'+str(i)+'.png',normalize=True)
-    fake1 = x_hat.detach()
-    fake1 = Variable(imagePool.query(fake.data)) # sample from image buffer
-    recon_fake1 = netD1(fake)
-    #vutils.save_image(recon_fake, '/home1/sgb/began/recon_fake/'+str(i)+'.png', normalize=True)
-    # compute L(x) = x-D(x)
-    errD_real1 = torch.mean(torch.abs(recon_real1 - target))
-    # compute L(G(z_D)) = G(z)-D(G(z))
-    errD_fake1 = torch.mean(torch.abs(recon_fake1 - fake1))
-    # compute L_D = L(x)- L(G(z_D))
-    errD1 = errD_real1 - k * errD_fake1
-    errD1.backward()
-    optimizerD1.step()
+class D(nn.Module):
+  def __init__(self, nc, ndf, hidden_size):
+    super(D, self).__init__()
 
-    # prevent computing gradients of weights in Discriminator
-    for p in netD1.parameters():
-      p.requires_grad = False
-    netG.zero_grad() # start to update G
+    # 256
+    self.conv1 = nn.Sequential(nn.Conv2d(nc,ndf,kernel_size=3,stride=1,padding=1),
+                               nn.ELU(True))
+    # 256
+    self.conv2 = conv_block(ndf,ndf)
+    # 128
+    self.conv3 = conv_block(ndf, ndf*2)
+    # 64
+    self.conv4 = conv_block(ndf*2, ndf*3)
+    # 32
+    self.encode = nn.Conv2d(ndf*3, hidden_size, kernel_size=1,stride=1,padding=0)
+    self.decode = nn.Conv2d(hidden_size, ndf, kernel_size=1,stride=1,padding=0)
+    # 32
+    self.deconv4 = deconv_block(ndf, ndf)
+    # 64
+    self.deconv3 = deconv_block(ndf, ndf)
+    # 128
+    self.deconv2 = deconv_block(ndf, ndf)
+    # 256
+    self.deconv1 = nn.Sequential(nn.Conv2d(ndf,ndf,kernel_size=3,stride=1,padding=1),
+                                 nn.ELU(True),
+                                 nn.Conv2d(ndf,ndf,kernel_size=3,stride=1,padding=1),
+                                 nn.ELU(True),
+                                 nn.Conv2d(ndf, nc, kernel_size=3, stride=1, padding=1),
+                                 nn.Tanh())
+    """
+    self.deconv1 = nn.Sequential(nn.Conv2d(ndf,nc,kernel_size=3,stride=1,padding=1),
+                                 nn.Tanh())
+    """
+  def forward(self,x):
+    out1 = self.conv1(x) 
+    out2 = self.conv2(out1)
+    out3 = self.conv3(out2)
+    out4 = self.conv4(out3)
+    out5 = self.encode(out4)
+    dout5= self.decode(out5)
+    dout4= self.deconv4(dout5)
+    dout3= self.deconv3(dout4)
+    dout2= self.deconv2(dout3)
+    dout1= self.deconv1(dout2)
+    return dout1
 
-    recon_fake1 = netD1(x_hat1)  # reuse previously computed x_hat
-    # vutils.save_image(recon_fake,'/home1/sgb/began/recon_fake1/'+str(i)+'.png', normalize=True)
-    errG_ = torch.mean(torch.abs(recon_fake1 - x_hat1))
-    errG = lambdaGAN * errG_
-    if lambdaGAN != 0:
-        errG.backward()
-    # update praams
-    optimizerG.step()
 
-    # NOTE compute k_t and M_global
-    balance = (opt.gamma * errD_real1 - errD_fake1).item()
-    k = min(max(k + opt.lambda_k * balance, 0), 1)
-    measure = errD_real1.item() + np.abs(balance)
-    M_global.update(measure, target.size(0))
-    #####
+def blockUNet(in_c, out_c, name, transposed=False, bn=True, relu=True, dropout=False):
+  block = nn.Sequential()
+  if relu:
+    block.add_module('%srelu' % name, nn.ReLU(inplace=True))
+  else:
+    block.add_module('%sleakyrelu' % name, nn.LeakyReLU(0.2, inplace=True))
+  if not transposed:
+    block.add_module('%sconv' % name, nn.Conv2d(in_c, out_c, 4, 2, 1, bias=False))
+  else:
+    block.add_module('%stconv' % name, nn.ConvTranspose2d(in_c, out_c, 4, 2, 1, bias=False))
+  if bn:
+    block.add_module('%sbn' % name, nn.BatchNorm2d(out_c))
+  if dropout:
+    block.add_module('%sdropout' % name, nn.Dropout2d(0.5, inplace=True))
+  return block
 
 
 
-    if ganIterations % opt.display == 0:
-      print('[%d/%d][%d/%d] L_D: %f L_img: %f L_G: %f D(x): %f D(G(z)): %f / %f'
-          % (epoch, opt.niter, i, len(dataloader),
-             errD.item(), L_img.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-      sys.stdout.flush()
-      trainLogger.write('%d\t%f\t%f\t%f\t%f\t%f\t%f\n' % \
-                        (i, errD.item(), errG.item(), L_img.item(), D_x, D_G_z1, D_G_z2))
-      trainLogger.flush()
-    if ganIterations % opt.evalIter == 0:
-      val_batch_output = torch.FloatTensor(val_input.size()).fill_(0)
-      for idx in range(val_input.size(0)):
-        single_img = val_input[idx,:,:,:].unsqueeze(0)
-        with torch.no_grad():
-            val_inputv = Variable(single_img)
-        x_hat_val = netG(val_inputv)
-        val_batch_output[idx,:,:,:].copy_(x_hat_val.data.squeeze(0))
-      vutils.save_image(val_batch_output, '%s/generated_epoch_%08d_iter%08d.png' % \
-        (opt.exp, epoch, ganIterations), normalize=True)
+class G(nn.Module):
+  def __init__(self, input_nc, output_nc, nf):
+    super(G, self).__init__()
 
-  # do checkpointing
-  torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.exp, epoch))
-  torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.exp, epoch))
-trainLogger.close()
+    # input is 256 x 256
+    layer_idx = 1
+    name = 'layer%d' % layer_idx
+    layer1 = nn.Sequential()
+    layer1.add_module(name, nn.Conv2d(input_nc, nf, 4, 2, 1, bias=False))
+    # input is 128 x 128
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer2 = blockUNet(nf, nf*2, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 64 x 64
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer3 = blockUNet(nf*2, nf*4, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 32
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer4 = blockUNet(nf*4, nf*8, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 16
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer5 = blockUNet(nf*8, nf*8, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 8
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer6 = blockUNet(nf*8, nf*8, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 4
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer7 = blockUNet(nf*8, nf*8, name, transposed=False, bn=True, relu=False, dropout=False)
+    # input is 2 x  2
+    layer_idx += 1
+    name = 'layer%d' % layer_idx
+    layer8 = blockUNet(nf*8, nf*8, name, transposed=False, bn=False, relu=False, dropout=False)
+
+    ## NOTE: decoder
+    # input is 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*8
+    dlayer8 = blockUNet(d_inc, nf*8, name, transposed=True, bn=True, relu=True, dropout=True)
+
+    #import pdb; pdb.set_trace()
+    # input is 2
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*8*2
+    dlayer7 = blockUNet(d_inc, nf*8, name, transposed=True, bn=True, relu=True, dropout=True)
+    # input is 4
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*8*2
+    dlayer6 = blockUNet(d_inc, nf*8, name, transposed=True, bn=True, relu=True, dropout=True)
+    # input is 8
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*8*2
+    dlayer5 = blockUNet(d_inc, nf*8, name, transposed=True, bn=True, relu=True, dropout=False)
+    # input is 16
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*8*2
+    dlayer4 = blockUNet(d_inc, nf*4, name, transposed=True, bn=True, relu=True, dropout=False)
+    # input is 32
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*4*2
+    dlayer3 = blockUNet(d_inc, nf*2, name, transposed=True, bn=True, relu=True, dropout=False)
+    # input is 64
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    d_inc = nf*2*2
+    dlayer2 = blockUNet(d_inc, nf, name, transposed=True, bn=True, relu=True, dropout=False)
+    # input is 128
+    layer_idx -= 1
+    name = 'dlayer%d' % layer_idx
+    dlayer1 = nn.Sequential()
+    d_inc = nf*2
+    dlayer1.add_module('%srelu' % name, nn.ReLU(inplace=True))
+    dlayer1.add_module('%stconv' % name, nn.ConvTranspose2d(d_inc, output_nc, 4, 2, 1, bias=False))
+    dlayer1.add_module('%stanh' % name, nn.Tanh())
+
+    self.layer1 = layer1
+    self.layer2 = layer2
+    self.layer3 = layer3
+    self.layer4 = layer4
+    self.layer5 = layer5
+    self.layer6 = layer6
+    self.layer7 = layer7
+    self.layer8 = layer8
+    self.dlayer8 = dlayer8
+    self.dlayer7 = dlayer7
+    self.dlayer6 = dlayer6
+    self.dlayer5 = dlayer5
+    self.dlayer4 = dlayer4
+    self.dlayer3 = dlayer3
+    self.dlayer2 = dlayer2
+    self.dlayer1 = dlayer1
+
+  def forward(self, x):
+    out1 = self.layer1(x)
+    out2 = self.layer2(out1)
+    out3 = self.layer3(out2)
+    out4 = self.layer4(out3)
+    out5 = self.layer5(out4)
+    out6 = self.layer6(out5)
+    out7 = self.layer7(out6)
+    out8 = self.layer8(out7)
+    dout8 = self.dlayer8(out8)
+    dout8_out7 = torch.cat([dout8, out7], 1)
+    dout7 = self.dlayer7(dout8_out7)
+    dout7_out6 = torch.cat([dout7, out6], 1)
+    dout6 = self.dlayer6(dout7_out6)
+    dout6_out5 = torch.cat([dout6, out5], 1)
+    dout5 = self.dlayer5(dout6_out5)
+    dout5_out4 = torch.cat([dout5, out4], 1)
+    dout4 = self.dlayer4(dout5_out4)
+    dout4_out3 = torch.cat([dout4, out3], 1)
+    dout3 = self.dlayer3(dout4_out3)
+    dout3_out2 = torch.cat([dout3, out2], 1)
+    dout2 = self.dlayer2(dout3_out2)
+    dout2_out1 = torch.cat([dout2, out1], 1)
+    dout1 = self.dlayer1(dout2_out1)
+    return dout1
