@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
 
-import models.UNet as net
+import models.RubbingNet as net
 from misc import *
 
 import matplotlib.pyplot as plt # plt 用于显示图片
