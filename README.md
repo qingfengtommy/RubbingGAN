@@ -1,5 +1,5 @@
 # RubbingGAN
-RubbingGAN - Pytorch Implementation (AI for Content Creation Workshop CVPR 2022) 
+RubbingGAN - Pytorch Implementation 
 # Introduction
 This is the implementation of the paper "End-to-End Rubbing Restoration Using Generative Adversarial Network. Our goal is to restore the imcomplete calligraphy characters on the traidional Chinese stone inscriptions (Rubbings).
 We collect the dataset of ZhangMenglongBei, which used for rubbing restoration.
