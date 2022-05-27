@@ -11,4 +11,5 @@ We have the following datasets:
 <Br/>
 ·Incomplete Dataset. 
 # Reference
-·pix2pixBEGAN.pytorch https://github.com/taey16/pix2pixBEGAN.pytorch
+·pix2pix——pytorch https://github.com/taey16/pix2pixBEGAN.pytorch
+·began——pytorch https://github.com/taey16/pix2pixBEGAN.pytorch
