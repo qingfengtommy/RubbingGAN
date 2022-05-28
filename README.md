@@ -17,11 +17,11 @@ We have the following datasets:
 
 - Testing Dataset
 
-- Incomplete Dataset
+- Restoration (Incomplete) Dataset
 
 # Train
 
-``` python RubbingGAN.py --dataroot PATH TO Training Dataset --valDataroot PATH TO Validation Dataset --exp PATH TO store outputs of generating images --log PATH TO store logs
+``` python RubbingGAN.py --dataroot PATH TO Training Dataset --valDataroot PATH TO Validation Dataset --exp PATH TO store outputs of generating images --log PATH TO store logs ```
 
 # Reference
 
