@@ -19,9 +19,17 @@ We have the following datasets:
 
 - Restoration (Incomplete) Dataset
 
+![Training Dateset](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig3a.png)
+
+![Restoration Dateset](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig3b.png)
+
 # Train
 
 ``` python RubbingGAN.py --dataroot PATH TO Training Dataset --valDataroot PATH TO Validation Dataset --exp PATH TO store outputs of generating images --log PATH TO store logs ```
+
+# Restoration Result
+
+![Resotration Result](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig11.png)
 
 # Reference
 
