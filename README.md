@@ -18,18 +18,10 @@ We have the following datasets:
 - Testing Dataset
 
 - Restoration (Incomplete) Dataset
-
-<a href="url">
   
-<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3a.png)" alt="Training Dataset" align="left" width="400"/>
+<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3a.png" alt="Training Dataset" align="left" width="400"/>
 
-</a>
-
-<a href="url">
-  
-<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3b.png)" alt="Restoration Dataset" width="400"/>
-
- </a>
+<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3b.png" alt="Restoration Dataset" width="400"/>
  
 # Train
 
