@@ -19,17 +19,25 @@ We have the following datasets:
 
 - Restoration (Incomplete) Dataset
 
-![Training Dateset](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3a.png)
+<a href="url">
+  
+<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3a.png)" alt="Training Dataset" align="left" width="400"/>
 
-![Restoration Dateset](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3b.png)
+</a>
 
+<a href="url">
+  
+<img src="https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3b.png)" alt="Restoration Dataset" width="400"/>
+
+ </a>
+ 
 # Train
 
 ``` python RubbingGAN.py --dataroot PATH TO Training Dataset --valDataroot PATH TO Validation Dataset --exp PATH TO store outputs of generating images --log PATH TO store logs ```
 
 # Restoration Result
 
-![Resotration Result](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig11.png)
+<img src=https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig11.png alt="Resotration Result" width="500"/>
 
 # Reference
 
