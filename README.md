@@ -19,6 +19,10 @@ We have the following datasets:
 
 - Incomplete Dataset
 
+# Train
+
+``` python RubbingGAN.py --dataroot PATH TO Training Dataset --valDataroot PATH TO Validation Dataset --exp PATH TO store outputs of generating images --log PATH TO store logs
+
 # Reference
 
 - pix2pix-pytorch https://github.com/taey16/pix2pixBEGAN.pytorch
