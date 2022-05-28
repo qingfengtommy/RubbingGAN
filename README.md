@@ -19,9 +19,9 @@ We have the following datasets:
 
 - Restoration (Incomplete) Dataset
 
-![Training Dateset](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig3a.png)
+![Training Dateset](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3a.png)
 
-![Restoration Dateset](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig3b.png)
+![Restoration Dateset](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig3b.png)
 
 # Train
 
@@ -29,7 +29,7 @@ We have the following datasets:
 
 # Restoration Result
 
-![Resotration Result](https://github.com/qingfengtommy/RubbingGAN/master/imgs/Fig11.png)
+![Resotration Result](https://github.com/qingfengtommy/RubbingGAN/blob/main/imgs/Fig11.png)
 
 # Reference
 
